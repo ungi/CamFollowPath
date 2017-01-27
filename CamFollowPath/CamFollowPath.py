@@ -46,7 +46,7 @@ class CamFollowPathWidget(ScriptedLoadableModuleWidget):
     self.camTransformNodeId = None
     self.camTransformObserverTag = None
 
-    self.closestToRasTransformNodeId = None
+    self.pathToToolTransformNodeId = None
 
     self.fiducialNodeId = None
 
@@ -93,7 +93,7 @@ class CamFollowPathWidget(ScriptedLoadableModuleWidget):
     self.inputTransformSelector.showChildNodeTypes = False
     self.inputTransformSelector.setMRMLScene(slicer.mrmlScene)
     self.inputTransformSelector.setToolTip("Pick the tracked transform for the camera.")
-    parametersFormLayout.addRow("Input camera transform: ", self.inputTransformSelector)
+    parametersFormLayout.addRow("Input transform (Tool): ", self.inputTransformSelector)
 
     # output transform selector
 
@@ -102,13 +102,19 @@ class CamFollowPathWidget(ScriptedLoadableModuleWidget):
     self.outputTransformSelector.selectNodeUponCreation = True
     self.outputTransformSelector.addEnabled = True
     self.outputTransformSelector.removeEnabled = True
+    self.outputTransformSelector.renameEnabled = True
     self.outputTransformSelector.noneEnabled = True
     self.outputTransformSelector.showHidden = False
     self.outputTransformSelector.showChildNodeTypes = False
     self.outputTransformSelector.setMRMLScene(slicer.mrmlScene)
     self.outputTransformSelector.setToolTip("Pick the filtered transform for the camera.")
-    parametersFormLayout.addRow("Output camera transform: ", self.outputTransformSelector)
+    parametersFormLayout.addRow("Output transform (PathToTool): ", self.outputTransformSelector)
 
+    # range spinbox
+
+    self.rangeSpinBox = ctk.ctkDoubleSpinBox()
+    self.rangeSpinBox.setValue(10.0)
+    parametersFormLayout.addRow("Snap range (mm): ", self.rangeSpinBox)
 
     # check box
 
@@ -154,7 +160,7 @@ class CamFollowPathWidget(ScriptedLoadableModuleWidget):
     closestToRasNode = self.outputTransformSelector.currentNode()
     if closestToRasNode == None:
       return
-    self.closestToRasTransformNodeId = closestToRasNode.GetID()
+    self.pathToToolTransformNodeId = closestToRasNode.GetID()
 
     camTransformNode = self.inputTransformSelector.currentNode()
     if camTransformNode == None:
@@ -187,21 +193,29 @@ class CamFollowPathWidget(ScriptedLoadableModuleWidget):
     closestCurvePoint = numpy.array([0.0, 0.0, 0.0])
     self.logic.closestPointFiducials(fiducials, camPosition_Ras, closestCurvePoint)
 
-    camToClosestTranslation = closestCurvePoint - camPosition_Ras[:3]
+    pathToCamTranslation = closestCurvePoint - camPosition_Ras[:3]
+
+    range = self.rangeSpinBox.value
+    d = numpy.linalg.norm(pathToCamTranslation)
 
     closestToCamTransform = vtk.vtkTransform()
-    closestToCamTransform.Translate(camToClosestTranslation[0], camToClosestTranslation[1], camToClosestTranslation[2])
+
+    if d > range:
+      closestToCamTransform.Identity()
+    else:
+      closestToCamTransform.Translate(pathToCamTranslation[0], pathToCamTranslation[1], pathToCamTranslation[2])
+
     closestToCamTransform.Update()
 
-    if self.closestToRasTransformNodeId == None:
+    if self.pathToToolTransformNodeId == None:
       logging.error('Output transform ID not found')
       return
-    closestToRas = slicer.util.getNode(self.closestToRasTransformNodeId)
-    if closestToRas == None:
+    pathToTool = slicer.util.getNode(self.pathToToolTransformNodeId)
+    if pathToTool == None:
       logging.error('Output not specified')
       return
 
-    closestToRas.SetAndObserveTransformToParent(closestToCamTransform)
+    pathToTool.SetAndObserveTransformToParent(closestToCamTransform)
 
 
 # CamFollowPathLogic
@@ -295,6 +309,7 @@ class CamFollowPathTest(ScriptedLoadableModuleTest):
     closestToRasTransformNode = slicer.vtkMRMLLinearTransformNode()
     closestToRasTransformNode.SetName('ClosestToRas')
     slicer.mrmlScene.AddNode(closestToRasTransformNode)
+    closestToRasTransformNode.SetAndObserveTransformNodeID(cTransformNode.GetID())
 
     closestModel.SetAndObserveTransformNodeID(closestToRasTransformNode.GetID())
 
