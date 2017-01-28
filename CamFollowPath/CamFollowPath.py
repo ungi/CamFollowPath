@@ -173,37 +173,43 @@ class CamFollowPathWidget(ScriptedLoadableModuleWidget):
 
   def snapCamTransform(self, observer, eventid):
 
-    fiducials = slicer.util.getNode(self.fiducialNodeId)
-    if fiducials == None:
+    pathFids_Ras = slicer.util.getNode(self.fiducialNodeId)
+    if pathFids_Ras == None:
       logging.error('Invalid fiducial node ID')
       return
 
     # Compute position of the camera
 
-    camToRas = slicer.util.getNode(self.camTransformNodeId)
-    if camToRas == None:
+    camToRasNode = slicer.util.getNode(self.camTransformNodeId)
+    if camToRasNode == None:
       logging.error('Transform node ID error: ' + self.camTransformNodeId)
       return
 
     camToRasTransform = vtk.vtkGeneralTransform()
-    camToRas.GetTransformToWorld(camToRasTransform)
+    camToRasNode.GetTransformToWorld(camToRasTransform)
     camPosition_Cam = numpy.array([0.0, 0.0, 0.0])
     camPosition_Ras = camToRasTransform.TransformFloatPoint(camPosition_Cam)
 
-    closestCurvePoint = numpy.array([0.0, 0.0, 0.0])
-    self.logic.closestPointFiducials(fiducials, camPosition_Ras, closestCurvePoint)
+    pathPoint_Ras = numpy.array([0.0, 0.0, 0.0])
+    self.logic.closestPointFiducials(pathFids_Ras, camPosition_Ras, pathPoint_Ras)
 
-    pathToCamTranslation = closestCurvePoint - camPosition_Ras[:3]
+    rasToCam = vtk.vtkGeneralTransform()
+    camToRasNode.GetTransformToWorld(rasToCam)
+    rasToCam.Inverse()
+    rasToCam.Update()
+    pathPoint_Cam = rasToCam.TransformFloatPoint(pathPoint_Ras)
+
+    pathToToolTranslation = pathPoint_Cam - camPosition_Cam
 
     range = self.rangeSpinBox.value
-    d = numpy.linalg.norm(pathToCamTranslation)
+    d = numpy.linalg.norm(pathToToolTranslation)
 
     closestToCamTransform = vtk.vtkTransform()
 
     if d > range:
       closestToCamTransform.Identity()
     else:
-      closestToCamTransform.Translate(pathToCamTranslation[0], pathToCamTranslation[1], pathToCamTranslation[2])
+      closestToCamTransform.Translate(pathToToolTranslation[0], pathToToolTranslation[1], pathToToolTranslation[2])
 
     closestToCamTransform.Update()
 
@@ -225,23 +231,24 @@ class CamFollowPathLogic(ScriptedLoadableModuleLogic):
   def __init__(self):
     pass
 
-  def closestPointFiducials(self, fid, p, closestPoint):
-    n = fid.GetNumberOfFiducials()
+
+  def closestPointFiducials(self, pathFids_Ras, camPosition_Ras, pathPoint_Ras):
+    n = pathFids_Ras.GetNumberOfFiducials()
     if n < 2:
       return False
     minDistance = 9000000
     for i in range(n - 1):
       l1 = [0, 0, 0]
       l2 = [0, 0, 0]
-      fid.GetNthFiducialPosition(i, l1)
-      fid.GetNthFiducialPosition(i + 1, l2)
+      pathFids_Ras.GetNthFiducialPosition(i, l1)
+      pathFids_Ras.GetNthFiducialPosition(i + 1, l2)
       t = vtk.mutable(0)
       cp = [0, 0, 0]
-      d = vtk.vtkLine.DistanceToLine(p, l1, l2, t, cp)
+      d = vtk.vtkLine.DistanceToLine(camPosition_Ras, l1, l2, t, cp)
       if d < minDistance:
         minDistance = d
         for j in range(3):
-          closestPoint[j] = cp[j]
+          pathPoint_Ras[j] = cp[j]
     return True
 
 
